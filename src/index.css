@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-canvas: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-ink: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-active: var(--danger-active);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-fg: var(--success-fg);
+  --color-success-soft: var(--success-soft);
+  --color-barcode-canvas: var(--barcode-canvas);
+  --color-barcode-ink: var(--barcode-ink);
+  --spacing-13: 3.25rem;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas,
+    monospace;
+}
+
+:root,
+[data-theme="light"] {
+  --bg: #f6f5f2;
+  --surface: #fffcf7;
+  --surface-hover: #f3f0e8;
+  --surface-active: #ebe7dd;
+  --fg: #1a1916;
+  --fg-muted: #6b675e;
+  --border: #e6e3db;
+  --border-strong: #d4cfc3;
+  --accent: #0f6e56;
+  --accent-fg: #f6fffb;
+  --accent-hover: #0c5a47;
+  --accent-active: #0a4b3b;
+  --accent-soft: #e5f4ee;
+  --danger: #b42318;
+  --danger-fg: #fff7f6;
+  --danger-hover: #96190f;
+  --danger-active: #7a140c;
+  --danger-soft: #fde8e6;
+  --warning: #b45309;
+  --warning-fg: #fffbeb;
+  --warning-soft: #fef3c7;
+  --success: #0f6e56;
+  --success-fg: #f6fffb;
+  --success-soft: #e5f4ee;
+  --barcode-canvas: #ffffff;
+  --barcode-ink: #000000;
+  --shadow-sm: 0 1px 2px rgb(26 25 22 / 0.04), 0 0 0 1px rgb(26 25 22 / 0.03);
+  --shadow-md: 0 6px 16px rgb(26 25 22 / 0.06), 0 0 0 1px rgb(26 25 22 / 0.04);
+  --shadow-lg: 0 16px 40px rgb(26 25 22 / 0.12), 0 0 0 1px rgb(26 25 22 / 0.05);
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #121211;
+  --surface: #1c1b19;
+  --surface-hover: #262522;
+  --surface-active: #2e2c28;
+  --fg: #f3f1ea;
+  --fg-muted: #9a958a;
+  --border: #2e2c28;
+  --border-strong: #3d3a34;
+  --accent: #3dba96;
+  --accent-fg: #06231b;
+  --accent-hover: #4ec9a5;
+  --accent-active: #63d4b2;
+  --accent-soft: #16352c;
+  --danger: #f97066;
+  --danger-fg: #2a0b09;
+  --danger-hover: #fda29b;
+  --danger-active: #feb8b2;
+  --danger-soft: #3b1613;
+  --warning: #fbbf24;
+  --warning-fg: #2a1a05;
+  --warning-soft: #3d2a0d;
+  --success: #3dba96;
+  --success-fg: #06231b;
+  --success-soft: #16352c;
+  --barcode-canvas: #ffffff;
+  --barcode-ink: #000000;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.28), 0 0 0 1px rgb(255 255 255 / 0.03);
+  --shadow-md: 0 8px 20px rgb(0 0 0 / 0.35), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-lg: 0 20px 48px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.05);
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme="light"],
+  [data-theme="dark"] {
+    --duration-fast: 0.01ms;
+    --duration-base: 0.01ms;
+    --duration-slow: 0.01ms;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100dvh;
+}
+
+html {
+  background: var(--bg);
+  overflow-x: clip;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation: none;
+  }
+}

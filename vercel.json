@@ -1,0 +1,10 @@
+{
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/voucher-code.ts": {
+      "maxDuration": 15
+    }
+  }
+}
