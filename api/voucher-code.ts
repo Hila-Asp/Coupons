@@ -256,14 +256,17 @@ function isEmptyShell(body: string): boolean {
 }
 
 /**
- * Fetch voucher page text via a public HTTPS reader. Only call with URLs that
+ * Fetch voucher page text via public HTTPS readers. Only call with URLs that
  * already passed assertAllowedVoucherUrl (allowlisted HTTPS Pluxee host).
+ *
+ * Target URLs must be encoded so the voucher `?token` is not parsed as the
+ * outer reader URL's query string.
  */
 export async function fetchViaTextReader(
   allowedUrl: URL,
   signal: AbortSignal,
 ): Promise<
-  | { ok: true; body: string; status: number }
+  | { ok: true; body: string; status: number; reader: string }
   | {
       ok: false;
       status: number;
@@ -280,48 +283,88 @@ export async function fetchViaTextReader(
     };
   }
 
-  const readerUrl = `${TEXT_READER_PREFIX}${allowedUrl.href}`;
-  try {
-    const response = await fetch(readerUrl, {
-      method: 'GET',
-      redirect: 'follow',
-      signal,
-      headers: {
-        Accept: 'text/plain,*/*;q=0.8',
-        'User-Agent': BROWSER_HEADERS['User-Agent'],
-      },
-    });
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: 502,
-        code: 'fetch_failed',
-        message: 'Could not read the voucher page via the text reader.',
-      };
+  const href = allowedUrl.href;
+  const candidates: Array<{ name: string; url: string }> = [
+    {
+      name: 'jina-encoded',
+      url: `${TEXT_READER_PREFIX}${encodeURIComponent(href)}`,
+    },
+    {
+      name: 'allorigins',
+      url: `https://api.allorigins.win/raw?url=${encodeURIComponent(href)}`,
+    },
+  ];
+
+  let lastBody: { body: string; status: number; reader: string } | null = null;
+  let sawTimeout = false;
+
+  for (const candidate of candidates) {
+    if (signal.aborted) {
+      break;
     }
-    const buffer = await response.arrayBuffer();
-    const slice =
-      buffer.byteLength > MAX_BODY_BYTES
-        ? buffer.slice(0, MAX_BODY_BYTES)
-        : buffer;
-    const body = new TextDecoder('utf-8', { fatal: false }).decode(slice);
-    return { ok: true, body, status: response.status };
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      return {
-        ok: false,
-        status: 504,
-        code: 'timeout',
-        message: 'Timed out while reading the voucher page.',
-      };
+    try {
+      const response = await fetch(candidate.url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal,
+        headers: {
+          Accept: 'text/plain,text/html,*/*;q=0.8',
+          'User-Agent': BROWSER_HEADERS['User-Agent'],
+        },
+      });
+      if (!response.ok) {
+        console.info('voucher-code: text_reader_http', {
+          reader: candidate.name,
+          status: response.status,
+        });
+        continue;
+      }
+      const buffer = await response.arrayBuffer();
+      const slice =
+        buffer.byteLength > MAX_BODY_BYTES
+          ? buffer.slice(0, MAX_BODY_BYTES)
+          : buffer;
+      const body = new TextDecoder('utf-8', { fatal: false }).decode(slice);
+      lastBody = { body, status: response.status, reader: candidate.name };
+      if (extractTwentyDigitCodes(body).length > 0) {
+        return { ok: true, ...lastBody };
+      }
+      console.info('voucher-code: text_reader_no_code', {
+        reader: candidate.name,
+        ...describeFetchedBody(body),
+        snippet: redactVoucherCodes(body).replace(/\s+/g, ' ').slice(0, 160),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        sawTimeout = true;
+        break;
+      }
+      console.info('voucher-code: text_reader_error', {
+        reader: candidate.name,
+        name: error instanceof Error ? error.name : 'unknown',
+      });
     }
+  }
+
+  if (lastBody) {
+    return { ok: true, ...lastBody };
+  }
+
+  if (sawTimeout || signal.aborted) {
     return {
       ok: false,
-      status: 502,
-      code: 'fetch_failed',
-      message: 'Could not reach the voucher page via the text reader.',
+      status: 504,
+      code: 'timeout',
+      message: 'Timed out while reading the voucher page.',
     };
   }
+
+  return {
+    ok: false,
+    status: 502,
+    code: 'fetch_failed',
+    message: 'Could not reach the voucher page via the text reader.',
+  };
 }
 
 function headersFromNode(
@@ -614,68 +657,75 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const onVercel = Boolean(process.env.VERCEL);
-  const directDeadline = createDeadline(DIRECT_FETCH_TIMEOUT_MS, request.signal);
-  let via = onVercel ? 'https-ipv4' : 'fetch';
+  let via = onVercel ? 'skipped-direct' : 'fetch';
   let fetched: Awaited<ReturnType<typeof fetchSameHost>> = {
     ok: false,
     status: 502,
     code: 'fetch_failed',
     message: 'Direct fetch did not run.',
   };
-  try {
-    const primary = onVercel ? loadViaHttpsIpv4 : loadViaFetch;
-    fetched = await fetchSameHost(allowed.url, directDeadline.signal, primary);
-    // On Vercel, Pluxee's empty bot shell rarely differs between loaders — skip
-    // the second hop so the text-reader budget is not eaten by a doomed retry.
-    if (
-      !onVercel &&
-      fetched.ok &&
-      extractTwentyDigitCodes(fetched.body).length === 0 &&
-      isEmptyShell(fetched.body)
-    ) {
-      via = 'https-ipv4';
+
+  // Pluxee returns an empty bot shell to Vercel/AWS IPs — skip straight to readers.
+  if (!onVercel) {
+    const directDeadline = createDeadline(
+      DIRECT_FETCH_TIMEOUT_MS,
+      request.signal,
+    );
+    try {
       fetched = await fetchSameHost(
         allowed.url,
         directDeadline.signal,
-        loadViaHttpsIpv4,
+        loadViaFetch,
       );
+      if (
+        fetched.ok &&
+        extractTwentyDigitCodes(fetched.body).length === 0 &&
+        isEmptyShell(fetched.body)
+      ) {
+        via = 'https-ipv4';
+        fetched = await fetchSameHost(
+          allowed.url,
+          directDeadline.signal,
+          loadViaHttpsIpv4,
+        );
+      } else {
+        via = 'fetch';
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        fetched = {
+          ok: false,
+          status: 504,
+          code: 'timeout',
+          message: 'Timed out while contacting the voucher page.',
+        };
+      } else {
+        fetched = {
+          ok: false,
+          status: 502,
+          code: 'fetch_failed',
+          message: 'Could not reach the voucher page.',
+        };
+      }
+    } finally {
+      directDeadline.dispose();
     }
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      fetched = {
-        ok: false,
-        status: 504,
-        code: 'timeout',
-        message: 'Timed out while contacting the voucher page.',
-      };
-    } else {
-      fetched = {
-        ok: false,
-        status: 502,
-        code: 'fetch_failed',
-        message: 'Could not reach the voucher page.',
-      };
-    }
-  } finally {
-    directDeadline.dispose();
-  }
 
-  if (!fetched.ok) {
-    // Security / policy failures must not fall through to an external reader.
-    if (
-      fetched.code === 'redirect_blocked' ||
-      fetched.code === 'host_not_allowed' ||
-      fetched.code === 'https_required' ||
-      fetched.code === 'invalid_url'
-    ) {
-      return jsonError(fetched.status, fetched.code, fetched.message);
+    if (!fetched.ok) {
+      if (
+        fetched.code === 'redirect_blocked' ||
+        fetched.code === 'host_not_allowed' ||
+        fetched.code === 'https_required' ||
+        fetched.code === 'invalid_url'
+      ) {
+        return jsonError(fetched.status, fetched.code, fetched.message);
+      }
+      console.info('voucher-code: direct_fetch_failed_trying_reader', {
+        via,
+        code: fetched.code,
+        status: fetched.status,
+      });
     }
-    // Still try the reader — direct fetch often fails or empties from Vercel IPs.
-    console.info('voucher-code: direct_fetch_failed_trying_reader', {
-      via,
-      code: fetched.code,
-      status: fetched.status,
-    });
   }
 
   let codes =
@@ -690,18 +740,23 @@ export async function POST(request: Request): Promise<Response> {
         hasQuery: fetched.hasQuery,
         ...describeFetchedBody(fetched.body),
       });
+    } else {
+      console.info('voucher-code: trying_text_reader', { via });
     }
     const readerDeadline = createDeadline(READER_TIMEOUT_MS, request.signal);
     try {
-      const reader = await fetchViaTextReader(allowed.url, readerDeadline.signal);
+      const reader = await fetchViaTextReader(
+        allowed.url,
+        readerDeadline.signal,
+      );
       if (reader.ok) {
         const readerCodes = extractTwentyDigitCodes(reader.body);
         if (readerCodes.length > 0) {
           codes = readerCodes;
-          resolvedVia = 'text-reader';
+          resolvedVia = `text-reader:${reader.reader}`;
         } else {
           console.info('voucher-code: code_not_found', {
-            via: 'text-reader',
+            via: `text-reader:${reader.reader}`,
             status: reader.status,
             ...describeFetchedBody(reader.body),
             snippet: redactVoucherCodes(reader.body)
@@ -742,8 +797,9 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  if (resolvedVia === 'text-reader') {
+  if (resolvedVia.startsWith('text-reader')) {
     console.info('voucher-code: scraped_via_text_reader', {
+      via: resolvedVia,
       codeCount: codes.length,
     });
   }
