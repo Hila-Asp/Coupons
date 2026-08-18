@@ -4,7 +4,8 @@ import { request as httpsRequest } from 'node:https';
 setDefaultResultOrder('ipv4first');
 
 const ALLOWED_HOST = 'myconsumers.pluxee.co.il';
-const FETCH_TIMEOUT_MS = 12_000;
+const DIRECT_FETCH_TIMEOUT_MS = 5_000;
+const READER_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 3;
 const MAX_BODY_BYTES = 1_500_000;
 /** Pluxee often serves an empty shell to datacenter IPs; text readers still see the page. */
@@ -612,37 +613,87 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(allowed.status, allowed.code, allowed.message);
   }
 
-  const deadline = createDeadline(FETCH_TIMEOUT_MS, request.signal);
+  const onVercel = Boolean(process.env.VERCEL);
+  const directDeadline = createDeadline(DIRECT_FETCH_TIMEOUT_MS, request.signal);
+  let via = onVercel ? 'https-ipv4' : 'fetch';
+  let fetched: Awaited<ReturnType<typeof fetchSameHost>> = {
+    ok: false,
+    status: 502,
+    code: 'fetch_failed',
+    message: 'Direct fetch did not run.',
+  };
   try {
-    const preferIpv4 = Boolean(process.env.VERCEL);
-    const primary = preferIpv4 ? loadViaHttpsIpv4 : loadViaFetch;
-    const fallback = preferIpv4 ? loadViaFetch : loadViaHttpsIpv4;
-    let via = preferIpv4 ? 'https-ipv4' : 'fetch';
-    let fetched = await fetchSameHost(allowed.url, deadline.signal, primary);
+    const primary = onVercel ? loadViaHttpsIpv4 : loadViaFetch;
+    fetched = await fetchSameHost(allowed.url, directDeadline.signal, primary);
+    // On Vercel, Pluxee's empty bot shell rarely differs between loaders — skip
+    // the second hop so the text-reader budget is not eaten by a doomed retry.
     if (
+      !onVercel &&
       fetched.ok &&
       extractTwentyDigitCodes(fetched.body).length === 0 &&
       isEmptyShell(fetched.body)
     ) {
-      via = preferIpv4 ? 'fetch' : 'https-ipv4';
-      fetched = await fetchSameHost(allowed.url, deadline.signal, fallback);
+      via = 'https-ipv4';
+      fetched = await fetchSameHost(
+        allowed.url,
+        directDeadline.signal,
+        loadViaHttpsIpv4,
+      );
     }
-    if (!fetched.ok) {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      fetched = {
+        ok: false,
+        status: 504,
+        code: 'timeout',
+        message: 'Timed out while contacting the voucher page.',
+      };
+    } else {
+      fetched = {
+        ok: false,
+        status: 502,
+        code: 'fetch_failed',
+        message: 'Could not reach the voucher page.',
+      };
+    }
+  } finally {
+    directDeadline.dispose();
+  }
+
+  if (!fetched.ok) {
+    // Security / policy failures must not fall through to an external reader.
+    if (
+      fetched.code === 'redirect_blocked' ||
+      fetched.code === 'host_not_allowed' ||
+      fetched.code === 'https_required' ||
+      fetched.code === 'invalid_url'
+    ) {
       return jsonError(fetched.status, fetched.code, fetched.message);
     }
+    // Still try the reader — direct fetch often fails or empties from Vercel IPs.
+    console.info('voucher-code: direct_fetch_failed_trying_reader', {
+      via,
+      code: fetched.code,
+      status: fetched.status,
+    });
+  }
 
-    let codes = extractTwentyDigitCodes(fetched.body);
-    let resolvedVia = via;
+  let codes =
+    fetched.ok ? extractTwentyDigitCodes(fetched.body) : ([] as string[]);
+  let resolvedVia = via;
 
-    // Datacenter IPs often get an empty Pluxee shell; reader fallback still works.
-    if (codes.length === 0) {
+  if (codes.length === 0) {
+    if (fetched.ok) {
       console.info('voucher-code: trying_text_reader', {
         via,
         path: fetched.finalPath,
         hasQuery: fetched.hasQuery,
         ...describeFetchedBody(fetched.body),
       });
-      const reader = await fetchViaTextReader(allowed.url, deadline.signal);
+    }
+    const readerDeadline = createDeadline(READER_TIMEOUT_MS, request.signal);
+    try {
+      const reader = await fetchViaTextReader(allowed.url, readerDeadline.signal);
       if (reader.ok) {
         const readerCodes = extractTwentyDigitCodes(reader.body);
         if (readerCodes.length > 0) {
@@ -664,9 +715,13 @@ export async function POST(request: Request): Promise<Response> {
           status: reader.status,
         });
       }
+    } finally {
+      readerDeadline.dispose();
     }
+  }
 
-    if (codes.length === 0) {
+  if (codes.length === 0) {
+    if (fetched.ok) {
       console.info('voucher-code: code_not_found', {
         via: resolvedVia,
         path: fetched.finalPath,
@@ -679,23 +734,21 @@ export async function POST(request: Request): Promise<Response> {
           .replace(/\s+/g, ' ')
           .slice(0, 160),
       });
-      return jsonError(
-        422,
-        'code_not_found',
-        'No 20-digit code was found on the page.',
-      );
     }
-
-    if (resolvedVia === 'text-reader') {
-      console.info('voucher-code: scraped_via_text_reader', {
-        codeCount: codes.length,
-      });
-    }
-
-    return jsonOk(codes);
-  } finally {
-    deadline.dispose();
+    return jsonError(
+      422,
+      'code_not_found',
+      'No 20-digit code was found on the page.',
+    );
   }
+
+  if (resolvedVia === 'text-reader') {
+    console.info('voucher-code: scraped_via_text_reader', {
+      codeCount: codes.length,
+    });
+  }
+
+  return jsonOk(codes);
 }
 
 export function GET(): Response {
