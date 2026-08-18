@@ -409,7 +409,7 @@ function loadViaHttpsIpv4(
     }
     signal.addEventListener('abort', onAbort, { once: true });
     request.on('error', reject);
-    request.setTimeout(FETCH_TIMEOUT_MS, () => {
+    request.setTimeout(DIRECT_FETCH_TIMEOUT_MS, () => {
       request.destroy();
       reject(Object.assign(new Error('Timeout'), { name: 'TimeoutError' }));
     });
