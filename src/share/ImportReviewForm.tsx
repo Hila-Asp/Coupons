@@ -65,6 +65,20 @@ function findCompanyByName(
   return companies.find((company) => company.name.trim().toLowerCase() === needle);
 }
 
+function isInsecureRedirectFailure(scrape: Extract<ScrapeStatus, { kind: 'failed' }>): boolean {
+  if (scrape.code === 'redirect_blocked') {
+    return true;
+  }
+  return /non-HTTPS redirect/i.test(scrape.message);
+}
+
+function failedScrapeBody(scrape: Extract<ScrapeStatus, { kind: 'failed' }>): string {
+  if (isInsecureRedirectFailure(scrape)) {
+    return 'The voucher page redirected insecurely, so we stopped. Paste the 20-digit code, or open the link in your browser.';
+  }
+  return scrape.message;
+}
+
 function openVoucherPage(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
@@ -282,7 +296,7 @@ export function ImportReviewForm({
           }
         >
           {scrape.kind === 'failed'
-            ? scrape.message
+            ? failedScrapeBody(scrape)
             : 'Open the voucher page, copy the 20-digit code, and paste it here.'}
         </Banner>
       ) : null}

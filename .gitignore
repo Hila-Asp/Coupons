@@ -28,3 +28,6 @@ lock-part-*.txt
 *.njsproj
 *.sln
 *.sw?
+
+.vercel
+.env*

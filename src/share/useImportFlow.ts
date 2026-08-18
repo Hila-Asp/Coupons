@@ -57,7 +57,11 @@ export function useImportFlow(sharedText: string) {
         applyScrape(fingerprint, { kind: 'choice', codes: result.codes });
         return;
       }
-      applyScrape(fingerprint, { kind: 'failed', message: result.message });
+      applyScrape(fingerprint, {
+        kind: 'failed',
+        message: result.message,
+        code: result.code,
+      });
     },
     [applyScrape],
   );

@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
+  "regions": ["fra1"],
   "functions": {
     "api/voucher-code.ts": {
       "maxDuration": 15

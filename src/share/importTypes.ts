@@ -1,12 +1,13 @@
 import type { Voucher } from '../db';
 import type { ParsedVoucher } from '../parsers';
+import type { ScrapeErrorCode } from './scrapeVoucherCode';
 
 export type ScrapeStatus =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'success'; code: string }
   | { kind: 'choice'; codes: string[] }
-  | { kind: 'failed'; message: string }
+  | { kind: 'failed'; message: string; code?: ScrapeErrorCode }
   | { kind: 'skipped' };
 
 export interface ImportDraft {

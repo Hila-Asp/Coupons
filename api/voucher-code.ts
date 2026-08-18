@@ -1,7 +1,27 @@
+import { setDefaultResultOrder } from 'node:dns';
+import { request as httpsRequest } from 'node:https';
+
+setDefaultResultOrder('ipv4first');
+
 const ALLOWED_HOST = 'myconsumers.pluxee.co.il';
-const FETCH_TIMEOUT_MS = 8_000;
+const FETCH_TIMEOUT_MS = 12_000;
 const MAX_REDIRECTS = 3;
 const MAX_BODY_BYTES = 1_500_000;
+
+const BROWSER_HEADERS: Record<string, string> = {
+  Accept:
+    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7',
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Upgrade-Insecure-Requests': '1',
+  'Cache-Control': 'no-cache',
+  Pragma: 'no-cache',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+};
 
 export const config = {
   runtime: 'nodejs',
@@ -33,17 +53,49 @@ export interface VoucherCodeFailure {
   };
 }
 
-export function extractTwentyDigitCodes(html: string): string[] {
-  const matches = html.match(/(?<!\d)\d{20}(?!\d)/g);
-  if (!matches) {
-    return [];
+export interface FetchedBodyDiagnostics {
+  bodyLength: number;
+  looksHtml: boolean;
+  hasTitle: boolean;
+  hasHebrewVoucherWord: boolean;
+}
+
+const TWENTY_DIGIT_CODE = /(?:^|[^\d])(\d{20})(?!\d)/g;
+
+function collectTwentyDigitCodes(source: string): string[] {
+  const found = new Set<string>();
+  const pattern = new RegExp(TWENTY_DIGIT_CODE.source, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source)) !== null) {
+    found.add(match[1]);
   }
-  return [...new Set(matches)];
+  return [...found];
+}
+
+export function extractTwentyDigitCodes(html: string): string[] {
+  const fromRaw = collectTwentyDigitCodes(html);
+  if (fromRaw.length > 0) {
+    return fromRaw;
+  }
+  return collectTwentyDigitCodes(html.replace(/<[^>]+>/g, ''));
 }
 
 export function extractTwentyDigitCode(html: string): string | null {
   const codes = extractTwentyDigitCodes(html);
   return codes.length === 1 ? codes[0] : null;
+}
+
+export function redactVoucherCodes(text: string): string {
+  return text.replace(/\d{20}/g, '[CODE]');
+}
+
+export function describeFetchedBody(body: string): FetchedBodyDiagnostics {
+  return {
+    bodyLength: body.length,
+    looksHtml: /<html[\s>]|<!doctype html/i.test(body),
+    hasTitle: /<title[\s>]/i.test(body),
+    hasHebrewVoucherWord: body.includes('שובר'),
+  };
 }
 
 export function assertAllowedVoucherUrl(value: string):
@@ -100,10 +152,197 @@ function jsonOk(codes: string[]): Response {
 }
 
 function isTimeoutError(error: unknown): boolean {
-  return (
-    error instanceof DOMException &&
-    (error.name === 'TimeoutError' || error.name === 'AbortError')
-  );
+  if (typeof error !== 'object' || error === null || !('name' in error)) {
+    return false;
+  }
+  return error.name === 'TimeoutError' || error.name === 'AbortError';
+}
+
+function readSetCookies(headers: Headers): string[] {
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+  const single = headers.get('set-cookie');
+  return single ? [single] : [];
+}
+
+function storeCookies(store: Map<string, string>, setCookieHeaders: string[]): void {
+  for (const header of setCookieHeaders) {
+    const pair = header.split(';')[0] ?? '';
+    const eq = pair.indexOf('=');
+    if (eq <= 0) {
+      continue;
+    }
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (name) {
+      store.set(name, value);
+    }
+  }
+}
+
+function cookieHeader(store: Map<string, string>): string | undefined {
+  if (store.size === 0) {
+    return undefined;
+  }
+  return [...store.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+}
+
+function requestHeaders(
+  cookies: Map<string, string>,
+  referer?: string,
+): Record<string, string> {
+  const headers: Record<string, string> = { ...BROWSER_HEADERS };
+  const cookie = cookieHeader(cookies);
+  if (cookie) {
+    headers.Cookie = cookie;
+  }
+  if (referer) {
+    headers.Referer = referer;
+    headers['Sec-Fetch-Site'] = 'same-origin';
+  }
+  return headers;
+}
+
+function createDeadline(ms: number, parent?: AbortSignal): {
+  signal: AbortSignal;
+  dispose: () => void;
+} {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, ms);
+
+  const onParentAbort = (): void => {
+    clearTimeout(timer);
+    controller.abort();
+  };
+
+  if (parent) {
+    if (parent.aborted) {
+      clearTimeout(timer);
+      controller.abort();
+    } else {
+      parent.addEventListener('abort', onParentAbort, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', onParentAbort);
+    },
+  };
+}
+
+interface LoadedPage {
+  status: number;
+  headers: Headers;
+  body: Uint8Array;
+}
+
+type PageLoader = (
+  url: URL,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+) => Promise<LoadedPage>;
+
+function isEmptyShell(body: string): boolean {
+  return body.replace(/\s+/g, '') === '<html></html>';
+}
+
+function headersFromNode(
+  incoming: Record<string, string | string[] | undefined>,
+): Headers {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        headers.append(key, item);
+      }
+    } else {
+      headers.append(key, value);
+    }
+  }
+  return headers;
+}
+
+async function loadViaFetch(
+  url: URL,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<LoadedPage> {
+  const response = await fetch(url, {
+    method: 'GET',
+    redirect: 'manual',
+    signal,
+    headers,
+  });
+  const buffer = await response.arrayBuffer();
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: new Uint8Array(buffer),
+  };
+}
+
+function loadViaHttpsIpv4(
+  url: URL,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<LoadedPage> {
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest(
+      {
+        protocol: 'https:',
+        hostname: ALLOWED_HOST,
+        port: 443,
+        path: `${url.pathname}${url.search}`,
+        method: 'GET',
+        family: 4,
+        servername: ALLOWED_HOST,
+        headers: {
+          ...headers,
+          Host: ALLOWED_HOST,
+          Connection: 'close',
+          'Accept-Encoding': 'identity',
+        },
+      },
+      (incoming) => {
+        const chunks: Buffer[] = [];
+        incoming.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        incoming.on('end', () => {
+          resolve({
+            status: incoming.statusCode ?? 0,
+            headers: headersFromNode(incoming.headers),
+            body: new Uint8Array(Buffer.concat(chunks)),
+          });
+        });
+      },
+    );
+
+    const onAbort = (): void => {
+      request.destroy();
+      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+    request.on('error', reject);
+    request.setTimeout(FETCH_TIMEOUT_MS, () => {
+      request.destroy();
+      reject(Object.assign(new Error('Timeout'), { name: 'TimeoutError' }));
+    });
+    request.end();
+  });
 }
 
 async function readRequestedUrl(
@@ -149,26 +388,27 @@ async function readRequestedUrl(
 async function fetchSameHost(
   start: URL,
   signal: AbortSignal,
+  loader: PageLoader,
 ): Promise<
-  | { ok: true; body: string }
+  | {
+      ok: true;
+      body: string;
+      finalPath: string;
+      hasQuery: boolean;
+      status: number;
+      contentType: string | null;
+      cookieNameCount: number;
+    }
   | { ok: false; status: number; code: VoucherCodeErrorCode; message: string }
 > {
   let current = start;
+  let referer: string | undefined;
+  const cookies = new Map<string, string>();
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    let response: Response;
+    let page: LoadedPage;
     try {
-      response = await fetch(current, {
-        method: 'GET',
-        redirect: 'manual',
-        signal,
-        headers: {
-          Accept:
-            'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-          'User-Agent':
-            'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
-        },
-      });
+      page = await loader(current, requestHeaders(cookies, referer), signal);
     } catch (error) {
       if (isTimeoutError(error)) {
         return {
@@ -187,8 +427,10 @@ async function fetchSameHost(
       };
     }
 
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
+    storeCookies(cookies, readSetCookies(page.headers));
+
+    if (page.status >= 300 && page.status < 400) {
+      const location = page.headers.get('location');
       if (!location) {
         return {
           ok: false,
@@ -210,6 +452,21 @@ async function fetchSameHost(
         };
       }
 
+      // Pluxee sometimes issues an HTTP Location on the same allowlisted host.
+      // The start URL is already HTTPS + allowlisted; upgrade that hop to HTTPS
+      // instead of following plaintext HTTP. Off-host and other non-HTTPS
+      // redirects are still refused.
+      if (next.protocol === 'http:' && next.hostname === ALLOWED_HOST) {
+        next.protocol = 'https:';
+      }
+
+      // Pluxee's 301 is often `/b/` (or http://host/b/) and drops the token
+      // query. Keep the original allowlisted search string so the voucher
+      // page is not fetched as an empty shell.
+      if (!next.search && start.search) {
+        next.search = start.search;
+      }
+
       if (next.protocol !== 'https:') {
         return {
           ok: false,
@@ -228,27 +485,40 @@ async function fetchSameHost(
         };
       }
 
+      referer = current.href;
       current = next;
       continue;
     }
 
-    if (!response.ok) {
+    if (page.status < 200 || page.status >= 300) {
       return {
         ok: false,
         status: 502,
         code: 'fetch_failed',
-        message: `The voucher page returned ${response.status}.`,
+        message: `The voucher page returned ${page.status}.`,
       };
     }
 
-    const buffer = await response.arrayBuffer();
     const slice =
-      buffer.byteLength > MAX_BODY_BYTES
-        ? buffer.slice(0, MAX_BODY_BYTES)
-        : buffer;
+      page.body.byteLength > MAX_BODY_BYTES
+        ? page.body.slice(0, MAX_BODY_BYTES)
+        : page.body;
+    const body = new TextDecoder('utf-8', { fatal: false }).decode(slice);
+    if (isEmptyShell(body) && !current.search && start.search) {
+      const retry = new URL(current.href);
+      retry.search = start.search;
+      referer = current.href;
+      current = retry;
+      continue;
+    }
     return {
       ok: true,
-      body: new TextDecoder('utf-8', { fatal: false }).decode(slice),
+      body,
+      finalPath: current.pathname,
+      hasQuery: Boolean(current.search),
+      status: page.status,
+      contentType: page.headers.get('content-type'),
+      cookieNameCount: cookies.size,
     };
   }
 
@@ -271,26 +541,50 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(allowed.status, allowed.code, allowed.message);
   }
 
-  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  const signal = request.signal
-    ? AbortSignal.any([request.signal, timeout])
-    : timeout;
+  const deadline = createDeadline(FETCH_TIMEOUT_MS, request.signal);
+  try {
+    const preferIpv4 = Boolean(process.env.VERCEL);
+    const primary = preferIpv4 ? loadViaHttpsIpv4 : loadViaFetch;
+    const fallback = preferIpv4 ? loadViaFetch : loadViaHttpsIpv4;
+    let via = preferIpv4 ? 'https-ipv4' : 'fetch';
+    let fetched = await fetchSameHost(allowed.url, deadline.signal, primary);
+    if (
+      fetched.ok &&
+      extractTwentyDigitCodes(fetched.body).length === 0 &&
+      isEmptyShell(fetched.body)
+    ) {
+      via = preferIpv4 ? 'fetch' : 'https-ipv4';
+      fetched = await fetchSameHost(allowed.url, deadline.signal, fallback);
+    }
+    if (!fetched.ok) {
+      return jsonError(fetched.status, fetched.code, fetched.message);
+    }
 
-  const fetched = await fetchSameHost(allowed.url, signal);
-  if (!fetched.ok) {
-    return jsonError(fetched.status, fetched.code, fetched.message);
+    const codes = extractTwentyDigitCodes(fetched.body);
+    if (codes.length === 0) {
+      console.info('voucher-code: code_not_found', {
+        via,
+        path: fetched.finalPath,
+        hasQuery: fetched.hasQuery,
+        cookieNameCount: fetched.cookieNameCount,
+        status: fetched.status,
+        contentType: fetched.contentType,
+        ...describeFetchedBody(fetched.body),
+        snippet: redactVoucherCodes(fetched.body)
+          .replace(/\s+/g, ' ')
+          .slice(0, 160),
+      });
+      return jsonError(
+        422,
+        'code_not_found',
+        'No 20-digit code was found on the page.',
+      );
+    }
+
+    return jsonOk(codes);
+  } finally {
+    deadline.dispose();
   }
-
-  const codes = extractTwentyDigitCodes(fetched.body);
-  if (codes.length === 0) {
-    return jsonError(
-      422,
-      'code_not_found',
-      'No 20-digit code was found on the page.',
-    );
-  }
-
-  return jsonOk(codes);
 }
 
 export function GET(): Response {
