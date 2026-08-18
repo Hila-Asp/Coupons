@@ -14,6 +14,7 @@ dist-ssr
 .vercel
 _deploy-files.json
 deploy-files.json
+deploy-files-slim.json
 deploy-files-nolock.json
 deploy-chunk-*.json
 lock-part-*.txt

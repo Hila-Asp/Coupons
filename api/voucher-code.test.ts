@@ -308,4 +308,37 @@ describe('POST voucher-code fetchSameHost redirects', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('falls back to the text reader when the direct page has no code', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const href = hrefOf(input);
+      if (href === `https://r.jina.ai/${START_URL}`) {
+        return new Response(
+          'Title: שובר 12345678901234567890\n\n12345678901234567890\n',
+          { status: 200 },
+        );
+      }
+      if (href === START_URL) {
+        return new Response('<html><body>blocked</body></html>', {
+          status: 200,
+        });
+      }
+      throw new Error(`unexpected fetch: ${href}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(voucherRequest(START_URL));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      code: '12345678901234567890',
+      codes: ['12345678901234567890'],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(hrefOf(fetchMock.mock.calls[1][0] as RequestInfo | URL)).toBe(
+      `https://r.jina.ai/${START_URL}`,
+    );
+  });
 });

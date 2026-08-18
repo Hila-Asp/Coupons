@@ -7,6 +7,8 @@ const ALLOWED_HOST = 'myconsumers.pluxee.co.il';
 const FETCH_TIMEOUT_MS = 12_000;
 const MAX_REDIRECTS = 3;
 const MAX_BODY_BYTES = 1_500_000;
+/** Pluxee often serves an empty shell to datacenter IPs; text readers still see the page. */
+const TEXT_READER_PREFIX = 'https://r.jina.ai/';
 
 const BROWSER_HEADERS: Record<string, string> = {
   Accept:
@@ -250,6 +252,75 @@ type PageLoader = (
 
 function isEmptyShell(body: string): boolean {
   return body.replace(/\s+/g, '') === '<html></html>';
+}
+
+/**
+ * Fetch voucher page text via a public HTTPS reader. Only call with URLs that
+ * already passed assertAllowedVoucherUrl (allowlisted HTTPS Pluxee host).
+ */
+export async function fetchViaTextReader(
+  allowedUrl: URL,
+  signal: AbortSignal,
+): Promise<
+  | { ok: true; body: string; status: number }
+  | {
+      ok: false;
+      status: number;
+      code: VoucherCodeErrorCode;
+      message: string;
+    }
+> {
+  if (allowedUrl.protocol !== 'https:' || allowedUrl.hostname !== ALLOWED_HOST) {
+    return {
+      ok: false,
+      status: 403,
+      code: 'host_not_allowed',
+      message: 'Text reader fallback is limited to the allowlisted voucher host.',
+    };
+  }
+
+  const readerUrl = `${TEXT_READER_PREFIX}${allowedUrl.href}`;
+  try {
+    const response = await fetch(readerUrl, {
+      method: 'GET',
+      redirect: 'follow',
+      signal,
+      headers: {
+        Accept: 'text/plain,*/*;q=0.8',
+        'User-Agent': BROWSER_HEADERS['User-Agent'],
+      },
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: 502,
+        code: 'fetch_failed',
+        message: 'Could not read the voucher page via the text reader.',
+      };
+    }
+    const buffer = await response.arrayBuffer();
+    const slice =
+      buffer.byteLength > MAX_BODY_BYTES
+        ? buffer.slice(0, MAX_BODY_BYTES)
+        : buffer;
+    const body = new TextDecoder('utf-8', { fatal: false }).decode(slice);
+    return { ok: true, body, status: response.status };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return {
+        ok: false,
+        status: 504,
+        code: 'timeout',
+        message: 'Timed out while reading the voucher page.',
+      };
+    }
+    return {
+      ok: false,
+      status: 502,
+      code: 'fetch_failed',
+      message: 'Could not reach the voucher page via the text reader.',
+    };
+  }
 }
 
 function headersFromNode(
@@ -560,10 +631,44 @@ export async function POST(request: Request): Promise<Response> {
       return jsonError(fetched.status, fetched.code, fetched.message);
     }
 
-    const codes = extractTwentyDigitCodes(fetched.body);
+    let codes = extractTwentyDigitCodes(fetched.body);
+    let resolvedVia = via;
+
+    // Datacenter IPs often get an empty Pluxee shell; reader fallback still works.
+    if (codes.length === 0) {
+      console.info('voucher-code: trying_text_reader', {
+        via,
+        path: fetched.finalPath,
+        hasQuery: fetched.hasQuery,
+        ...describeFetchedBody(fetched.body),
+      });
+      const reader = await fetchViaTextReader(allowed.url, deadline.signal);
+      if (reader.ok) {
+        const readerCodes = extractTwentyDigitCodes(reader.body);
+        if (readerCodes.length > 0) {
+          codes = readerCodes;
+          resolvedVia = 'text-reader';
+        } else {
+          console.info('voucher-code: code_not_found', {
+            via: 'text-reader',
+            status: reader.status,
+            ...describeFetchedBody(reader.body),
+            snippet: redactVoucherCodes(reader.body)
+              .replace(/\s+/g, ' ')
+              .slice(0, 160),
+          });
+        }
+      } else {
+        console.info('voucher-code: text_reader_failed', {
+          code: reader.code,
+          status: reader.status,
+        });
+      }
+    }
+
     if (codes.length === 0) {
       console.info('voucher-code: code_not_found', {
-        via,
+        via: resolvedVia,
         path: fetched.finalPath,
         hasQuery: fetched.hasQuery,
         cookieNameCount: fetched.cookieNameCount,
@@ -579,6 +684,12 @@ export async function POST(request: Request): Promise<Response> {
         'code_not_found',
         'No 20-digit code was found on the page.',
       );
+    }
+
+    if (resolvedVia === 'text-reader') {
+      console.info('voucher-code: scraped_via_text_reader', {
+        codeCount: codes.length,
+      });
     }
 
     return jsonOk(codes);
