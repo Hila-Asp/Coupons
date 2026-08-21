@@ -39,10 +39,14 @@ function Invoke-Checked {
 function Invoke-RobocopyDir {
   param(
     [Parameter(Mandatory = $true)][string]$From,
-    [Parameter(Mandatory = $true)][string]$To
+    [Parameter(Mandatory = $true)][string]$To,
+    # Deletes files missing from the source. Vite renames bundles on every
+    # build, so a plain copy would keep stale ones and ship them in the APK.
+    [switch]$Mirror
   )
   New-Item -ItemType Directory -Force -Path $To | Out-Null
-  & robocopy $From $To /E /NFL /NDL /NJH /NJS /NC /NS /NP `
+  $mode = if ($Mirror) { '/MIR' } else { '/E' }
+  & robocopy $From $To $mode /NFL /NDL /NJH /NJS /NC /NS /NP `
     /XD .gradle build captures .idea .cxx .externalNativeBuild `
     /XF *.apk *.aab *.iml local.properties
   if ($LASTEXITCODE -ge 8) {
@@ -62,11 +66,16 @@ function Sync-StagingFromRepo {
     }
   }
 
-  foreach ($dir in @('node_modules', 'dist', 'scripts')) {
+  foreach ($dir in @('node_modules', 'scripts')) {
     $src = Join-Path $RepoRoot $dir
     if (Test-Path -LiteralPath $src) {
       Invoke-RobocopyDir -From $src -To (Join-Path $StagingRoot $dir)
     }
+  }
+
+  $distSrc = Join-Path $RepoRoot 'dist'
+  if (Test-Path -LiteralPath $distSrc) {
+    Invoke-RobocopyDir -From $distSrc -To (Join-Path $StagingRoot 'dist') -Mirror
   }
 
   $androidSrc = Join-Path $RepoRoot 'android'
@@ -114,9 +123,19 @@ function Ensure-ShareIntent {
   Invoke-Checked { node $script $Root } 'ensure-share-intent failed'
 }
 
+function Clear-WebAssets {
+  param([Parameter(Mandatory = $true)][string]$Root)
+  $public = Join-Path $Root 'android/app/src/main/assets/public'
+  if (Test-Path -LiteralPath $public) {
+    Write-Step 'Clearing previously synced web assets'
+    Remove-Item -LiteralPath $public -Recurse -Force
+  }
+}
+
 function Sync-Capacitor {
   param([Parameter(Mandatory = $true)][string]$Root)
   Write-Step 'Syncing Capacitor'
+  Clear-WebAssets -Root $Root
   Push-Location -LiteralPath $Root
   try {
     Invoke-Checked { npx --yes cap sync } 'npx cap sync failed'
