@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { isPluxeeVoucherUrl } from './pluxee';
 
 export type ScrapeErrorCode =
@@ -111,12 +112,27 @@ function shouldTryClientReader(code: ScrapeErrorCode): boolean {
   }
 }
 
+export function resolveVoucherCodeApiUrl(
+  apiBase: string | undefined,
+  native: boolean,
+): string | null {
+  const base = apiBase?.trim().replace(/\/+$/, '') ?? '';
+  if (base.length > 0) {
+    return `${base}/api/voucher-code`;
+  }
+  if (native) {
+    return null;
+  }
+  return '/api/voucher-code';
+}
+
 async function scrapeViaApi(
   url: string,
+  endpoint: string,
   signal?: AbortSignal,
 ): Promise<ScrapeResult> {
   try {
-    const response = await fetch('/api/voucher-code', {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -219,7 +235,15 @@ export async function scrapeVoucherCode(
   url: string,
   signal?: AbortSignal,
 ): Promise<ScrapeResult> {
-  const apiResult = await scrapeViaApi(url, signal);
+  const endpoint = resolveVoucherCodeApiUrl(
+    import.meta.env.VITE_API_BASE,
+    Capacitor.isNativePlatform(),
+  );
+  if (!endpoint) {
+    return scrapeViaClientTextReader(url, signal);
+  }
+
+  const apiResult = await scrapeViaApi(url, endpoint, signal);
   if (apiResult.ok) {
     return apiResult;
   }

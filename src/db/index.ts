@@ -4,6 +4,7 @@ export {
   BARCODE_FORMATS,
   COMPANY_COLOR_PRESETS,
   VOUCHER_STATUSES,
+  isUsedVoucher,
 } from './schema';
 export type {
   BarcodeFormat,
@@ -14,15 +15,19 @@ export type {
 } from './schema';
 export { EntityNotFoundError } from './errors';
 export {
+  companiesWithSmsSender,
   createCompany,
   deleteCompany,
+  findCompanyBySmsSender,
   getCompany,
   listCompanies,
+  rememberCompanySmsSender,
   updateCompany,
 } from './companies';
 export type { CompanyInput } from './companies';
 export {
   createVoucher,
+  deleteUsedVouchersByCompany,
   deleteVoucher,
   getVoucher,
   getVoucherBySourceUrl,
@@ -35,9 +40,12 @@ export {
 export type { VoucherInput, VoucherPatch } from './vouchers';
 export {
   createImportRecord,
+  deleteImportRecordsForVouchers,
   getImportRecord,
   hasImportRecord,
+  isTraceableFingerprint,
   listImportRecords,
+  pruneOrphanedImportRecords,
 } from './importRecords';
 export type { ImportRecordInput } from './importRecords';
 export {

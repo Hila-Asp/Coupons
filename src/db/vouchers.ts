@@ -1,6 +1,12 @@
 import { db } from './database';
 import { EntityNotFoundError } from './errors';
-import type { BarcodeFormat, Voucher, VoucherStatus } from './schema';
+import { deleteImportRecordsForVouchers } from './importRecords';
+import {
+  isUsedVoucher,
+  type BarcodeFormat,
+  type Voucher,
+  type VoucherStatus,
+} from './schema';
 
 export interface VoucherInput {
   companyId: string;
@@ -10,6 +16,7 @@ export interface VoucherInput {
   initialBalance: number;
   url?: string;
   expiresAt?: number;
+  receivedAt?: number;
   barcodeFormat: BarcodeFormat;
   barcodeImage?: Blob;
   status?: VoucherStatus;
@@ -25,6 +32,7 @@ export type VoucherPatch = {
   initialBalance?: number;
   url?: string | null;
   expiresAt?: number | null;
+  receivedAt?: number | null;
   barcodeFormat?: BarcodeFormat;
   barcodeImage?: Blob | null;
   status?: VoucherStatus;
@@ -61,6 +69,10 @@ export function applyVoucherPatch(
       patch.expiresAt === undefined
         ? existing.expiresAt
         : (patch.expiresAt ?? undefined),
+    receivedAt:
+      patch.receivedAt === undefined
+        ? existing.receivedAt
+        : (patch.receivedAt ?? undefined),
     barcodeFormat: patch.barcodeFormat ?? existing.barcodeFormat,
     barcodeImage:
       patch.barcodeImage === undefined
@@ -137,6 +149,7 @@ export async function createVoucher(input: VoucherInput): Promise<Voucher> {
     initialBalance: requireAmount(input.initialBalance, 'initialBalance'),
     url: optionalTrim(input.url),
     expiresAt: input.expiresAt,
+    receivedAt: input.receivedAt,
     barcodeFormat: input.barcodeFormat,
     barcodeImage: input.barcodeImage,
     status: input.status ?? 'active',
@@ -164,11 +177,30 @@ export async function updateVoucher(
 }
 
 export async function deleteVoucher(id: string): Promise<void> {
-  const existing = await db.vouchers.get(id);
-  if (!existing) {
-    throw new EntityNotFoundError('Voucher', id);
-  }
-  await db.vouchers.delete(id);
+  await db.transaction('rw', db.vouchers, db.importRecords, async () => {
+    const existing = await db.vouchers.get(id);
+    if (!existing) {
+      throw new EntityNotFoundError('Voucher', id);
+    }
+    await db.vouchers.delete(id);
+    await deleteImportRecordsForVouchers([existing]);
+  });
+}
+
+/** Clears out spent vouchers in one folder. Returns how many were removed. */
+export async function deleteUsedVouchersByCompany(
+  companyId: string,
+): Promise<number> {
+  return db.transaction('rw', db.vouchers, db.importRecords, async () => {
+    const vouchers = await db.vouchers
+      .where('companyId')
+      .equals(companyId)
+      .toArray();
+    const used = vouchers.filter(isUsedVoucher);
+    await db.vouchers.bulkDelete(used.map((voucher) => voucher.id));
+    await deleteImportRecordsForVouchers(used);
+    return used.length;
+  });
 }
 
 export async function markVoucherUsed(id: string): Promise<Voucher> {

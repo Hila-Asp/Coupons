@@ -6,6 +6,7 @@ export interface ExpandingFabProps {
   onOpenChange: (open: boolean) => void;
   onNewVoucher: () => void;
   onNewCompany: () => void;
+  onImportSms?: () => void;
 }
 
 export function ExpandingFab({
@@ -13,6 +14,7 @@ export function ExpandingFab({
   onOpenChange,
   onNewVoucher,
   onNewCompany,
+  onImportSms,
 }: ExpandingFabProps) {
   useEffect(() => {
     if (!open) {
@@ -62,6 +64,15 @@ export function ExpandingFab({
               onNewCompany();
             }}
           />
+          {onImportSms ? (
+            <FabAction
+              label="Import SMS"
+              onClick={() => {
+                onOpenChange(false);
+                onImportSms();
+              }}
+            />
+          ) : null}
         </div>
         <button
           type="button"

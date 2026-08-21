@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   deleteCompany,
+  deleteUsedVouchersByCompany,
+  isUsedVoucher,
   useCompanies,
   useCompany,
   useVouchersByCompany,
@@ -12,8 +14,11 @@ import { ConfirmSheet } from '../components/ConfirmSheet';
 import { Toggle } from '../components/Toggle';
 import { VoucherCard } from '../components/VoucherCard';
 import { VoucherFlow } from '../components/VoucherFlow';
+import { VoucherSortControl } from '../components/VoucherSortControl';
+import { useVoucherSort } from '../hooks/useVoucherSort';
 import { formatShekel } from '../lib/money';
-import { isUsedVoucher, remainingStats } from '../lib/voucherStats';
+import { sortVouchers } from '../lib/sortVouchers';
+import { remainingStats } from '../lib/voucherStats';
 import { usePageTitle } from '../layout/usePageTitle';
 import { Button, EmptyState, useToast } from '../ui';
 
@@ -25,8 +30,10 @@ export function CompanyPage() {
   const company = useCompany(id);
   const vouchers = useVouchersByCompany(id);
   const [showUsed, setShowUsed] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState(false);
+  const [confirmDeleteUsed, setConfirmDeleteUsed] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { field, direction, setField, setDirection } = useVoucherSort();
 
   usePageTitle(company?.name);
 
@@ -34,10 +41,14 @@ export function CompanyPage() {
     if (!vouchers) {
       return [];
     }
-    return vouchers.filter((voucher) =>
-      showUsed ? isUsedVoucher(voucher) : !isUsedVoucher(voucher),
+    return sortVouchers(
+      vouchers.filter((voucher) =>
+        showUsed ? isUsedVoucher(voucher) : !isUsedVoucher(voucher),
+      ),
+      field,
+      direction,
     );
-  }, [vouchers, showUsed]);
+  }, [vouchers, showUsed, field, direction]);
 
   if (!id) {
     return (
@@ -90,7 +101,7 @@ export function CompanyPage() {
             </div>
           </section>
 
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             <p className="min-w-0 flex-1 truncate text-sm text-muted">
               {showUsed
                 ? usedCount === 1
@@ -104,6 +115,13 @@ export function CompanyPage() {
               checked={showUsed}
               onChange={setShowUsed}
               label="Used"
+            />
+            <VoucherSortControl
+              className="basis-full"
+              field={field}
+              direction={direction}
+              onFieldChange={setField}
+              onDirectionChange={setDirection}
             />
           </div>
 
@@ -132,6 +150,7 @@ export function CompanyPage() {
                   onOpen={() => api.openDetail(voucher.id)}
                   onMarkUsed={() => void api.markUsed(voucher.id)}
                   onUpdateBalance={() => api.openBalance(voucher)}
+                  onDelete={() => api.confirmDelete(voucher)}
                 />
               ))}
             </ul>
@@ -145,11 +164,23 @@ export function CompanyPage() {
             >
               Edit folder
             </Button>
+            {showUsed && usedCount > 0 ? (
+              <Button
+                variant="ghost"
+                fullWidth
+                className="text-danger hover:bg-danger-soft"
+                onClick={() => setConfirmDeleteUsed(true)}
+              >
+                {usedCount === 1
+                  ? 'Delete 1 used voucher'
+                  : `Delete ${usedCount} used vouchers`}
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               fullWidth
               className="text-danger hover:bg-danger-soft"
-              onClick={() => setConfirmDelete(true)}
+              onClick={() => setConfirmDeleteFolder(true)}
             >
               Delete folder
             </Button>
@@ -158,8 +189,38 @@ export function CompanyPage() {
           <AddFab onClick={() => api.openCreate(company.id)} />
 
           <ConfirmSheet
-            open={confirmDelete}
-            onClose={() => setConfirmDelete(false)}
+            open={confirmDeleteUsed}
+            onClose={() => setConfirmDeleteUsed(false)}
+            title="Delete used vouchers?"
+            description={`This permanently removes ${usedCount === 1 ? 'the used voucher' : `all ${usedCount} used vouchers`} in ${company.name}. Open vouchers are kept.`}
+            confirmLabel="Delete used"
+            destructive
+            loading={deleting}
+            onConfirm={() => {
+              void (async () => {
+                setDeleting(true);
+                try {
+                  const removed = await deleteUsedVouchersByCompany(company.id);
+                  toast(
+                    removed === 1
+                      ? '1 used voucher deleted'
+                      : `${removed} used vouchers deleted`,
+                    { tone: 'success' },
+                  );
+                  setConfirmDeleteUsed(false);
+                  setShowUsed(false);
+                } catch {
+                  toast('Could not delete used vouchers', { tone: 'danger' });
+                } finally {
+                  setDeleting(false);
+                }
+              })();
+            }}
+          />
+
+          <ConfirmSheet
+            open={confirmDeleteFolder}
+            onClose={() => setConfirmDeleteFolder(false)}
             title="Delete folder?"
             description="This deletes the company and every voucher inside it. You cannot undo this."
             confirmLabel="Delete folder"

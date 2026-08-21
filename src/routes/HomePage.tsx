@@ -1,13 +1,17 @@
-import { useState } from 'react';
-import { useCompanies, useVouchers } from '../db';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { isSmsInboxAvailable } from '../capacitor/smsInbox';
+import { isUsedVoucher, useCompanies, useVouchers } from '../db';
 import { CardSkeletonList } from '../components/PageSpinner';
 import { CompanyCard } from '../components/CompanyCard';
 import { ExpandingFab } from '../components/ExpandingFab';
 import { ExpiryBanner } from '../components/ExpiryBanner';
 import { VoucherCard } from '../components/VoucherCard';
 import { VoucherFlow } from '../components/VoucherFlow';
+import { VoucherSortControl } from '../components/VoucherSortControl';
+import { useVoucherSort } from '../hooks/useVoucherSort';
 import { listRelevantExpiries } from '../lib/expiry';
-import { isUsedVoucher } from '../lib/voucherStats';
+import { sortVouchers } from '../lib/sortVouchers';
 import { Button, EmptyState, SegmentedControl } from '../ui';
 
 const HOME_VIEWS = [
@@ -18,11 +22,25 @@ const HOME_VIEWS = [
 type HomeView = (typeof HOME_VIEWS)[number]['value'];
 
 export function HomePage() {
+  const navigate = useNavigate();
   const companies = useCompanies();
   const vouchers = useVouchers();
   const [view, setView] = useState<HomeView>('folders');
   const [fabOpen, setFabOpen] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const { field, direction, setField, setDirection } = useVoucherSort();
+  const smsInboxAvailable = isSmsInboxAvailable();
+
+  const openVouchers = useMemo(() => {
+    if (!vouchers) {
+      return [];
+    }
+    return sortVouchers(
+      vouchers.filter((voucher) => !isUsedVoucher(voucher)),
+      field,
+      direction,
+    );
+  }, [vouchers, field, direction]);
 
   if (companies === undefined || vouchers === undefined) {
     return (
@@ -56,6 +74,15 @@ export function HomePage() {
             ariaLabel="Home view"
           />
 
+          {view === 'all' ? (
+            <VoucherSortControl
+              field={field}
+              direction={direction}
+              onFieldChange={setField}
+              onDirectionChange={setDirection}
+            />
+          ) : null}
+
           {view === 'folders' ? (
             companies.length === 0 ? (
               <EmptyState
@@ -80,8 +107,7 @@ export function HomePage() {
                 ))}
               </ul>
             )
-          ) : vouchers.filter((voucher) => !isUsedVoucher(voucher)).length ===
-            0 ? (
+          ) : openVouchers.length === 0 ? (
             <EmptyState
               title={vouchers.length === 0 ? 'No vouchers yet' : 'No open vouchers'}
               description={
@@ -99,9 +125,7 @@ export function HomePage() {
             />
           ) : (
             <ul className="flex flex-col gap-3">
-              {vouchers
-                .filter((voucher) => !isUsedVoucher(voucher))
-                .map((voucher) => (
+              {openVouchers.map((voucher) => (
                 <VoucherCard
                   key={voucher.id}
                   voucher={voucher}
@@ -109,6 +133,7 @@ export function HomePage() {
                   onOpen={() => api.openDetail(voucher.id)}
                   onMarkUsed={() => void api.markUsed(voucher.id)}
                   onUpdateBalance={() => api.openBalance(voucher)}
+                  onDelete={() => api.confirmDelete(voucher)}
                 />
               ))}
             </ul>
@@ -119,6 +144,9 @@ export function HomePage() {
             onOpenChange={setFabOpen}
             onNewVoucher={() => api.openCreate()}
             onNewCompany={api.openCreateCompany}
+            onImportSms={
+              smsInboxAvailable ? () => navigate('/import/sms') : undefined
+            }
           />
         </div>
       )}

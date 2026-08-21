@@ -1,10 +1,9 @@
 import { type PointerEvent, useRef, useState } from 'react';
-import type { Company, Voucher } from '../db';
+import { isUsedVoucher, type Company, type Voucher } from '../db';
 import { cx } from '../lib/cx';
-import { formatExpiryLabel, isExpired } from '../lib/dates';
+import { formatExpiryLabel, formatReceivedLabel, isExpired } from '../lib/dates';
 import { isExpiringSoon } from '../lib/expiry';
 import { formatShekel } from '../lib/money';
-import { isUsedVoucher } from '../lib/voucherStats';
 import { Card } from '../ui';
 
 const ACTION_WIDTH = 168;
@@ -16,6 +15,7 @@ export interface VoucherCardProps {
   onOpen: () => void;
   onMarkUsed: () => void;
   onUpdateBalance: () => void;
+  onDelete: () => void;
 }
 
 export function VoucherCard({
@@ -24,6 +24,7 @@ export function VoucherCard({
   onOpen,
   onMarkUsed,
   onUpdateBalance,
+  onDelete,
 }: VoucherCardProps) {
   const [offset, setOffset] = useState(0);
   const [revealed, setRevealed] = useState(false);
@@ -100,14 +101,23 @@ export function VoucherCard({
         >
           Balance
         </button>
-        <button
-          type="button"
-          className="flex w-[84px] flex-col items-center justify-center gap-1 bg-warning-soft text-sm font-medium text-ink disabled:opacity-45"
-          disabled={used}
-          onClick={onMarkUsed}
-        >
-          Used
-        </button>
+        {used ? (
+          <button
+            type="button"
+            className="flex w-[84px] flex-col items-center justify-center gap-1 bg-danger-soft text-sm font-medium text-danger"
+            onClick={onDelete}
+          >
+            Delete
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="flex w-[84px] flex-col items-center justify-center gap-1 bg-warning-soft text-sm font-medium text-ink"
+            onClick={onMarkUsed}
+          >
+            Used
+          </button>
+        )}
       </div>
       <div
         className="relative touch-pan-y"
@@ -152,10 +162,17 @@ export function VoucherCard({
             <p className="truncate font-mono text-sm tracking-wide text-ink">
               {voucher.code}
             </p>
-            <div className="mt-1 flex min-w-0 items-baseline justify-between gap-3">
-              <p className="shrink-0 text-lg font-semibold tracking-tight">
-                {formatShekel(voucher.balance)}
-              </p>
+            <div className="mt-1 flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <p className="shrink-0 text-lg font-semibold tracking-tight">
+                  {formatShekel(voucher.balance)}
+                </p>
+                {voucher.receivedAt !== undefined ? (
+                  <p className="min-w-0 truncate text-xs text-muted">
+                    {formatReceivedLabel(voucher.receivedAt)}
+                  </p>
+                ) : null}
+              </div>
               {voucher.expiresAt !== undefined ? (
                 <p
                   className={cx(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Voucher } from './schema';
+import { isUsedVoucher, type Voucher } from './schema';
 import { applyVoucherPatch } from './vouchers';
 
 const sample: Voucher = {
@@ -11,6 +11,7 @@ const sample: Voucher = {
   initialBalance: 50,
   url: 'https://example.com',
   expiresAt: 1_775_606_399_999,
+  receivedAt: 1_755_000_000_000,
   barcodeFormat: 'code128',
   status: 'active',
   createdAt: 1,
@@ -37,5 +38,24 @@ describe('applyVoucherPatch', () => {
     const next = applyVoucherPatch(sample, { cvv: null, url: null }, 99);
     expect(next.cvv).toBeUndefined();
     expect(next.url).toBeUndefined();
+  });
+
+  it('keeps, replaces, and clears receivedAt', () => {
+    expect(applyVoucherPatch(sample, { balance: 20 }, 99).receivedAt).toBe(
+      sample.receivedAt,
+    );
+    expect(applyVoucherPatch(sample, { receivedAt: 5 }, 99).receivedAt).toBe(5);
+    expect(
+      applyVoucherPatch(sample, { receivedAt: null }, 99).receivedAt,
+    ).toBeUndefined();
+  });
+});
+
+describe('isUsedVoucher', () => {
+  it('treats a used status or an empty balance as used', () => {
+    expect(isUsedVoucher(sample)).toBe(false);
+    expect(isUsedVoucher({ ...sample, status: 'used' })).toBe(true);
+    expect(isUsedVoucher({ ...sample, balance: 0 })).toBe(true);
+    expect(isUsedVoucher({ ...sample, balance: -1 })).toBe(true);
   });
 });

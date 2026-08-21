@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { listCompanies, listVouchers } from '../db';
 import { listRelevantExpiries } from '../lib/expiry';
 import { setAppBadge } from './badge';
@@ -5,6 +6,10 @@ import { notifyExpiringVouchers } from './notify';
 import { registerPeriodicSync } from './periodicsync';
 
 export async function bootstrapNotifications(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    return;
+  }
+
   try {
     const [vouchers, companies] = await Promise.all([
       listVouchers(),

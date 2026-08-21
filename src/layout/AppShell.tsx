@@ -18,6 +18,9 @@ function titleForPath(pathname: string): string {
   if (pathname === '/share') {
     return 'Import';
   }
+  if (pathname === '/import/sms') {
+    return 'Import SMS';
+  }
   if (pathname.startsWith('/company/')) {
     return 'Company';
   }

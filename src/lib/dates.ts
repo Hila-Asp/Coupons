@@ -4,8 +4,22 @@ const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
 });
 
+const DAY_MONTH_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+});
+
 export function formatDate(timestamp: number): string {
   return DATE_FORMAT.format(new Date(timestamp));
+}
+
+/** Drops the year while it matches today's, to keep voucher cards narrow. */
+export function formatReceivedLabel(timestamp: number, now = Date.now()): string {
+  const date = new Date(timestamp);
+  if (date.getFullYear() === new Date(now).getFullYear()) {
+    return `Received ${DAY_MONTH_FORMAT.format(date)}`;
+  }
+  return `Received ${DATE_FORMAT.format(date)}`;
 }
 
 export function toDateInputValue(timestamp: number): string {
@@ -19,6 +33,15 @@ export function toDateInputValue(timestamp: number): string {
 export function fromDateInputValue(value: string): number {
   const [year, month, day] = value.split('-').map(Number);
   return new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+}
+
+/** Local midnight, for dates that mark when something happened. */
+export function startOfDayFromDateInput(value: string): number | undefined {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) {
+    return undefined;
+  }
+  return new Date(year, month - 1, day).getTime();
 }
 
 export function startOfLocalDay(timestamp: number): number {

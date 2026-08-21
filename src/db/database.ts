@@ -14,6 +14,18 @@ export class VoucherDatabase extends Dexie {
         'id, companyId, status, expiresAt, sourceUrl, createdAt, updatedAt',
       importRecords: 'fingerprint, parserId, importedAt',
     });
+    this.version(2).stores({
+      companies: 'id, name, createdAt',
+      vouchers:
+        'id, companyId, status, expiresAt, receivedAt, sourceUrl, createdAt, updatedAt',
+      importRecords: 'fingerprint, parserId, importedAt',
+    });
+    this.version(3).stores({
+      companies: 'id, name, createdAt',
+      vouchers:
+        'id, companyId, status, expiresAt, receivedAt, sourceUrl, createdAt, updatedAt',
+      importRecords: 'fingerprint, parserId, voucherId, importedAt',
+    });
   }
 }
 
