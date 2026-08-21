@@ -14,7 +14,10 @@ import { ConfirmSheet } from '../components/ConfirmSheet';
 import { Toggle } from '../components/Toggle';
 import { VoucherCard } from '../components/VoucherCard';
 import { VoucherFlow } from '../components/VoucherFlow';
+import { VoucherSortControl } from '../components/VoucherSortControl';
+import { useVoucherSort } from '../hooks/useVoucherSort';
 import { formatShekel } from '../lib/money';
+import { sortVouchers } from '../lib/sortVouchers';
 import { remainingStats } from '../lib/voucherStats';
 import { usePageTitle } from '../layout/usePageTitle';
 import { Button, EmptyState, useToast } from '../ui';
@@ -30,6 +33,7 @@ export function CompanyPage() {
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState(false);
   const [confirmDeleteUsed, setConfirmDeleteUsed] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { field, direction, setField, setDirection } = useVoucherSort();
 
   usePageTitle(company?.name);
 
@@ -37,10 +41,14 @@ export function CompanyPage() {
     if (!vouchers) {
       return [];
     }
-    return vouchers.filter((voucher) =>
-      showUsed ? isUsedVoucher(voucher) : !isUsedVoucher(voucher),
+    return sortVouchers(
+      vouchers.filter((voucher) =>
+        showUsed ? isUsedVoucher(voucher) : !isUsedVoucher(voucher),
+      ),
+      field,
+      direction,
     );
-  }, [vouchers, showUsed]);
+  }, [vouchers, showUsed, field, direction]);
 
   if (!id) {
     return (
@@ -93,7 +101,7 @@ export function CompanyPage() {
             </div>
           </section>
 
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             <p className="min-w-0 flex-1 truncate text-sm text-muted">
               {showUsed
                 ? usedCount === 1
@@ -107,6 +115,13 @@ export function CompanyPage() {
               checked={showUsed}
               onChange={setShowUsed}
               label="Used"
+            />
+            <VoucherSortControl
+              className="basis-full"
+              field={field}
+              direction={direction}
+              onFieldChange={setField}
+              onDirectionChange={setDirection}
             />
           </div>
 
