@@ -18,59 +18,81 @@ const shareTarget = {
   },
 };
 
-export default defineConfig({
+function skipPwa(mode: string): boolean {
+  return mode === 'capacitor' || process.env.CAPACITOR_BUILD === '1';
+}
+
+function virtualPwaRegisterStub(): PluginOption {
+  return {
+    name: 'virtual-pwa-register-stub',
+    resolveId(id) {
+      if (id === 'virtual:pwa-register') {
+        return id;
+      }
+    },
+    load(id) {
+      if (id === 'virtual:pwa-register') {
+        return 'export function registerSW() { return () => {}; }';
+      }
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: false,
-      includeAssets: [
-        'favicon.svg',
-        'icons/icon-192.png',
-        'icons/icon-512.png',
-        'icons/icon-maskable-512.png',
-      ],
-      manifest: {
-        name: 'Voucher Manager',
-        short_name: 'Vouchers',
-        description: 'Offline-first gift voucher manager',
-        start_url: '/',
-        scope: '/',
-        display: 'standalone',
-        orientation: 'portrait',
-        background_color: '#f6f5f2',
-        theme_color: '#0f6e56',
-        lang: 'en',
-        dir: 'ltr',
-        icons: [
-          {
-            src: '/icons/icon-192.png',
-            sizes: '192x192',
-            type: 'image/png',
+    skipPwa(mode)
+      ? virtualPwaRegisterStub()
+      : (VitePWA({
+          registerType: 'autoUpdate',
+          injectRegister: false,
+          includeAssets: [
+            'favicon.svg',
+            'icons/icon-192.png',
+            'icons/icon-512.png',
+            'icons/icon-maskable-512.png',
+          ],
+          manifest: {
+            name: 'Voucher Manager',
+            short_name: 'Vouchers',
+            description: 'Offline-first gift voucher manager',
+            start_url: '/',
+            scope: '/',
+            display: 'standalone',
+            orientation: 'portrait',
+            background_color: '#f6f5f2',
+            theme_color: '#0f6e56',
+            lang: 'en',
+            dir: 'ltr',
+            icons: [
+              {
+                src: '/icons/icon-192.png',
+                sizes: '192x192',
+                type: 'image/png',
+              },
+              {
+                src: '/icons/icon-512.png',
+                sizes: '512x512',
+                type: 'image/png',
+              },
+              {
+                src: '/icons/icon-maskable-512.png',
+                sizes: '512x512',
+                type: 'image/png',
+                purpose: 'maskable',
+              },
+            ],
+            share_target: shareTarget,
           },
-          {
-            src: '/icons/icon-512.png',
-            sizes: '512x512',
-            type: 'image/png',
+          workbox: {
+            globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
+            navigateFallback: 'index.html',
+            importScripts: ['/sw-expiry.js'],
           },
-          {
-            src: '/icons/icon-maskable-512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
-        ],
-        share_target: shareTarget,
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
-        navigateFallback: 'index.html',
-        importScripts: ['/sw-expiry.js'],
-      },
-    }) as PluginOption,
+        }) as PluginOption),
   ],
-});
+}));

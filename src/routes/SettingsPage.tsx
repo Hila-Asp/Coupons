@@ -1,4 +1,7 @@
+import { Capacitor } from '@capacitor/core';
 import { useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { isSmsInboxAvailable } from '../capacitor/smsInbox';
 import { Toggle } from '../components/Toggle';
 import { exportBackup, importBackup } from '../db';
 import { assertNever } from '../lib/assertNever';
@@ -48,6 +51,7 @@ function permissionCopy(
 
 export function SettingsPage() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { preference, setPreference } = useTheme();
   const { permission, request } = useNotificationPermission();
   const { parsers, isEnabled, setEnabled } = useParserPreferences();
@@ -55,6 +59,8 @@ export function SettingsPage() {
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const isNative = Capacitor.isNativePlatform();
+  const smsInboxAvailable = isSmsInboxAvailable();
   const notice = permissionCopy(permission);
 
   const onExport = async () => {
@@ -125,36 +131,84 @@ export function SettingsPage() {
       <section className="flex flex-col gap-3">
         <SectionHeading
           title="Notifications"
-          description="Expiry alerts need permission, and still work best when you open the app."
+          description={
+            isNative
+              ? 'Expiry alerts on this APK need a native notification plugin.'
+              : 'Expiry alerts need permission, and still work best when you open the app.'
+          }
         />
-        <Card>
-          <p className="text-sm font-semibold text-ink">{notice.title}</p>
-          <p className="mt-1 text-sm text-muted">{notice.body}</p>
-          {permission === 'default' ? (
+        {isNative ? (
+          <Card>
+            <p className="text-sm font-semibold text-ink">
+              Native expiry alerts are not set up yet
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              TODO: wire @capacitor/local-notifications (or a similar plugin)
+              for APK expiry reminders. Service-worker notifications from the
+              PWA do not run in this app, so they are turned off here.
+            </p>
+          </Card>
+        ) : (
+          <Card>
+            <p className="text-sm font-semibold text-ink">{notice.title}</p>
+            <p className="mt-1 text-sm text-muted">{notice.body}</p>
+            {permission === 'default' ? (
+              <Button
+                className="mt-4"
+                fullWidth
+                loading={requesting}
+                onClick={() => {
+                  void (async () => {
+                    setRequesting(true);
+                    try {
+                      const next = await request();
+                      if (next === 'granted') {
+                        toast('Notifications enabled', { tone: 'success' });
+                      } else if (next === 'denied') {
+                        toast('Permission was denied', { tone: 'warning' });
+                      }
+                    } finally {
+                      setRequesting(false);
+                    }
+                  })();
+                }}
+              >
+                Enable notifications
+              </Button>
+            ) : null}
+          </Card>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <SectionHeading
+          title="Import from SMS"
+          description="Create several coupons from one sender without multi-share."
+        />
+        {smsInboxAvailable ? (
+          <Card>
+            <p className="text-sm font-semibold text-ink">Read this phone's inbox</p>
+            <p className="mt-1 text-sm text-muted">
+              Choose a sender and a start date, then pick which messages to save.
+              Messages stay on this device.
+            </p>
             <Button
               className="mt-4"
               fullWidth
-              loading={requesting}
-              onClick={() => {
-                void (async () => {
-                  setRequesting(true);
-                  try {
-                    const next = await request();
-                    if (next === 'granted') {
-                      toast('Notifications enabled', { tone: 'success' });
-                    } else if (next === 'denied') {
-                      toast('Permission was denied', { tone: 'warning' });
-                    }
-                  } finally {
-                    setRequesting(false);
-                  }
-                })();
-              }}
+              onClick={() => navigate('/import/sms')}
             >
-              Enable notifications
+              Import SMS
             </Button>
-          ) : null}
-        </Card>
+          </Card>
+        ) : (
+          <Card>
+            <p className="text-sm font-semibold text-ink">Android APK only</p>
+            <p className="mt-1 text-sm text-muted">
+              Inbox import runs in the sideloaded Android app. Here, share one
+              voucher message at a time.
+            </p>
+          </Card>
+        )}
       </section>
 
       <section className="flex flex-col gap-3">
@@ -224,37 +278,54 @@ export function SettingsPage() {
 
       <section className="flex flex-col gap-3">
         <SectionHeading title="About" description={`Version ${__APP_VERSION__}`} />
-        <Card>
-          <p className="text-sm font-semibold text-ink">Share sheet on Android</p>
-          <p className="mt-1 text-sm text-muted">
-            Changing the share target requires uninstalling and reinstalling the
-            PWA. Android does not pick up a new share target from an update
-            alone.
-          </p>
-          <a
-            href="#reinstall"
-            className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          >
-            Reinstall guidance
-          </a>
-        </Card>
-        <Card id="reinstall">
-          <p className="text-sm font-semibold text-ink">
-            Reinstall on a Galaxy S25
-          </p>
-          <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-muted">
-            <li>Long-press the home-screen icon and remove the app.</li>
-            <li>
-              In Samsung Internet or Chrome, open the deployed site and use
-              Add to Home screen / Install app.
-            </li>
-            <li>
-              After install, share a voucher SMS and confirm Voucher Manager
-              appears in the share sheet.
-            </li>
-          </ol>
-        </Card>
-        {permission === 'denied' ? (
+        {isNative ? (
+          <Card>
+            <p className="text-sm font-semibold text-ink">
+              Share sheet on this APK
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              This install is a native app. From Samsung Messages, share a
+              voucher SMS and choose Voucher Manager. You do not need to Add
+              to Home screen.
+            </p>
+          </Card>
+        ) : (
+          <>
+            <Card>
+              <p className="text-sm font-semibold text-ink">
+                Share sheet on Android
+              </p>
+              <p className="mt-1 text-sm text-muted">
+                Changing the share target requires uninstalling and reinstalling
+                the PWA. Android does not pick up a new share target from an
+                update alone.
+              </p>
+              <a
+                href="#reinstall"
+                className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                Reinstall guidance
+              </a>
+            </Card>
+            <Card id="reinstall">
+              <p className="text-sm font-semibold text-ink">
+                Reinstall on a Galaxy S25
+              </p>
+              <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-muted">
+                <li>Long-press the home-screen icon and remove the app.</li>
+                <li>
+                  In Samsung Internet or Chrome, open the deployed site and use
+                  Add to Home screen / Install app.
+                </li>
+                <li>
+                  After install, share a voucher SMS and confirm Voucher Manager
+                  appears in the share sheet.
+                </li>
+              </ol>
+            </Card>
+          </>
+        )}
+        {!isNative && permission === 'denied' ? (
           <Banner tone="warning" title="Alerts are blocked">
             Open site settings for this origin and allow notifications, then
             reload the app.

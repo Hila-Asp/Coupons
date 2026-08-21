@@ -32,3 +32,24 @@ lock-part-*.txt
 
 .vercel
 .env*
+
+# Local sideload APK output
+dist-apk/
+
+# Release signing (do not commit)
+android/release.keystore
+android/*.keystore
+android/*.jks
+android/keystore.properties
+
+# Capacitor Android build artifacts (keep android/ source commitable)
+android/.gradle/
+android/**/build/
+android/local.properties
+android/captures/
+android/.idea/
+android/**/*.apk
+android/**/*.aab
+android/**/*.iml
+android/.externalNativeBuild/
+android/.cxx/

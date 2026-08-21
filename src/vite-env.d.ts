@@ -3,6 +3,10 @@
 
 declare const __APP_VERSION__: string;
 
+interface ImportMetaEnv {
+  readonly VITE_API_BASE?: string;
+}
+
 declare module 'jsbarcode' {
   interface JsBarcodeOptions {
     format?: string;
