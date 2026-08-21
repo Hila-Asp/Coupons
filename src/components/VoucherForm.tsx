@@ -10,7 +10,11 @@ import {
   type Voucher,
 } from '../db';
 import { assertNever } from '../lib/assertNever';
-import { fromDateInputValue, toDateInputValue } from '../lib/dates';
+import {
+  fromDateInputValue,
+  startOfDayFromDateInput,
+  toDateInputValue,
+} from '../lib/dates';
 import { useObjectUrl } from '../lib/useObjectUrl';
 import { Button, Input, Select, Sheet, useToast } from '../ui';
 import { ColorSwatches } from './ColorSwatches';
@@ -85,6 +89,7 @@ export function VoucherForm({
   const [initialBalance, setInitialBalance] = useState('');
   const [url, setUrl] = useState('');
   const [expiresOn, setExpiresOn] = useState('');
+  const [receivedOn, setReceivedOn] = useState('');
   const [barcodeFormat, setBarcodeFormat] = useState<BarcodeFormat>('code128');
   const [barcodeImage, setBarcodeImage] = useState<Blob>();
   const [errors, setErrors] = useState<FormErrors>({});
@@ -105,6 +110,9 @@ export function VoucherForm({
     setUrl(voucher?.url ?? '');
     setExpiresOn(
       voucher?.expiresAt !== undefined ? toDateInputValue(voucher.expiresAt) : '',
+    );
+    setReceivedOn(
+      voucher?.receivedAt !== undefined ? toDateInputValue(voucher.receivedAt) : '',
     );
     setBarcodeFormat(voucher?.barcodeFormat ?? 'code128');
     setBarcodeImage(voucher?.barcodeImage);
@@ -203,6 +211,7 @@ export function VoucherForm({
           initialBalance: parsedInitial,
           url: url.trim() ? url.trim() : null,
           expiresAt: expiresOn ? fromDateInputValue(expiresOn) : null,
+          receivedAt: receivedOn ? startOfDayFromDateInput(receivedOn) ?? null : null,
           barcodeFormat,
           barcodeImage: barcodeFormat === 'image' ? (barcodeImage ?? null) : null,
         });
@@ -216,6 +225,7 @@ export function VoucherForm({
           initialBalance: parsedInitial,
           url: url.trim() || undefined,
           expiresAt: expiresOn ? fromDateInputValue(expiresOn) : undefined,
+          receivedAt: receivedOn ? startOfDayFromDateInput(receivedOn) : undefined,
           barcodeFormat,
           barcodeImage: barcodeFormat === 'image' ? barcodeImage : undefined,
         });
@@ -319,6 +329,13 @@ export function VoucherForm({
           value={expiresOn}
           onChange={(event) => setExpiresOn(event.target.value)}
           hint="Optional"
+        />
+        <Input
+          label="Received"
+          type="date"
+          value={receivedOn}
+          onChange={(event) => setReceivedOn(event.target.value)}
+          hint="Date the coupon SMS arrived"
         />
         <Input
           label="Redemption URL"

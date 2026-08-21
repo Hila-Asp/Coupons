@@ -18,7 +18,3 @@ export function remainingStats(
   }
   return { count, total };
 }
-
-export function isUsedVoucher(voucher: Voucher): boolean {
-  return voucher.status === 'used' || voucher.balance <= 0;
-}

@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { useCompanies, useVouchers } from '../db';
+import { useNavigate } from 'react-router-dom';
+import { isSmsInboxAvailable } from '../capacitor/smsInbox';
+import { isUsedVoucher, useCompanies, useVouchers } from '../db';
 import { CardSkeletonList } from '../components/PageSpinner';
 import { CompanyCard } from '../components/CompanyCard';
 import { ExpandingFab } from '../components/ExpandingFab';
@@ -7,7 +9,6 @@ import { ExpiryBanner } from '../components/ExpiryBanner';
 import { VoucherCard } from '../components/VoucherCard';
 import { VoucherFlow } from '../components/VoucherFlow';
 import { listRelevantExpiries } from '../lib/expiry';
-import { isUsedVoucher } from '../lib/voucherStats';
 import { Button, EmptyState, SegmentedControl } from '../ui';
 
 const HOME_VIEWS = [
@@ -18,11 +19,13 @@ const HOME_VIEWS = [
 type HomeView = (typeof HOME_VIEWS)[number]['value'];
 
 export function HomePage() {
+  const navigate = useNavigate();
   const companies = useCompanies();
   const vouchers = useVouchers();
   const [view, setView] = useState<HomeView>('folders');
   const [fabOpen, setFabOpen] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const smsInboxAvailable = isSmsInboxAvailable();
 
   if (companies === undefined || vouchers === undefined) {
     return (
@@ -109,6 +112,7 @@ export function HomePage() {
                   onOpen={() => api.openDetail(voucher.id)}
                   onMarkUsed={() => void api.markUsed(voucher.id)}
                   onUpdateBalance={() => api.openBalance(voucher)}
+                  onDelete={() => api.confirmDelete(voucher)}
                 />
               ))}
             </ul>
@@ -119,6 +123,9 @@ export function HomePage() {
             onOpenChange={setFabOpen}
             onNewVoucher={() => api.openCreate()}
             onNewCompany={api.openCreateCompany}
+            onImportSms={
+              smsInboxAvailable ? () => navigate('/import/sms') : undefined
+            }
           />
         </div>
       )}

@@ -24,6 +24,7 @@ export function CompanyForm({
   const { toast } = useToast();
   const [name, setName] = useState('');
   const [color, setColor] = useState<string>(COMPANY_COLOR_PRESETS[0]);
+  const [smsSender, setSmsSender] = useState('');
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const isEdit = company !== undefined;
@@ -34,6 +35,7 @@ export function CompanyForm({
     }
     setName(company?.name ?? '');
     setColor(company?.color ?? COMPANY_COLOR_PRESETS[0]);
+    setSmsSender(company?.smsSender ?? '');
     setError(undefined);
     setSaving(false);
   }, [open, company]);
@@ -48,10 +50,10 @@ export function CompanyForm({
     setSaving(true);
     try {
       if (isEdit) {
-        await updateCompany(company.id, { name: trimmed, color });
+        await updateCompany(company.id, { name: trimmed, color, smsSender });
         toast('Company updated', { tone: 'success' });
       } else {
-        const created = await createCompany({ name: trimmed, color });
+        const created = await createCompany({ name: trimmed, color, smsSender });
         toast('Company created', { tone: 'success' });
         onCreated?.(created);
       }
@@ -93,6 +95,15 @@ export function CompanyForm({
           placeholder="Shufersal"
         />
         <ColorSwatches value={color} onChange={setColor} />
+        <Input
+          label="SMS sender"
+          value={smsSender}
+          onChange={(event) => setSmsSender(event.target.value)}
+          hint="Remembered from SMS import, so you don't retype it. Clear it to forget."
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="054…, +972…, or PLUXEE"
+        />
       </form>
     </Sheet>
   );

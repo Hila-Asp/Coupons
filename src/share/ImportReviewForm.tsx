@@ -9,6 +9,7 @@ import {
   type Company,
   type Voucher,
 } from '../db';
+import { openExternalUrl } from '../capacitor/openExternalUrl';
 import { assertNever } from '../lib/assertNever';
 import { cx } from '../lib/cx';
 import { Banner, Button, Card, Input, Select } from '../ui';
@@ -80,7 +81,7 @@ function failedScrapeBody(scrape: Extract<ScrapeStatus, { kind: 'failed' }>): st
 }
 
 function openVoucherPage(url: string) {
-  window.open(url, '_blank', 'noopener,noreferrer');
+  void openExternalUrl(url);
 }
 
 export interface ImportReviewFormProps {
@@ -244,6 +245,7 @@ export function ImportReviewForm({
         initialBalance: initial,
         url: url.trim() || undefined,
         expiresAt: timestampFromDateInput(expiresInput),
+        receivedAt: parsed.purchasedAt,
         barcodeFormat,
         sourceUrl: url.trim() || undefined,
       });

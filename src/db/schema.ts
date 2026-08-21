@@ -17,6 +17,8 @@ export interface Company {
   id: string;
   name: string;
   color: string;
+  /** Sender remembered from the last SMS inbox import for this company. */
+  smsSender?: string;
   createdAt: number;
 }
 
@@ -29,6 +31,8 @@ export interface Voucher {
   initialBalance: number;
   url?: string;
   expiresAt?: number;
+  /** When the voucher SMS arrived, so cards can be traced back to a message. */
+  receivedAt?: number;
   barcodeFormat: BarcodeFormat;
   barcodeImage?: Blob;
   status: VoucherStatus;
@@ -36,6 +40,11 @@ export interface Voucher {
   lastNotifiedAt?: number;
   createdAt: number;
   updatedAt: number;
+}
+
+/** A voucher counts as used once it is marked used or its balance runs out. */
+export function isUsedVoucher(voucher: Voucher): boolean {
+  return voucher.status === 'used' || voucher.balance <= 0;
 }
 
 export interface ImportRecord {

@@ -5,8 +5,9 @@ import {
   useVoucher,
   type Voucher,
 } from '../db';
+import { openExternalUrl } from '../capacitor/openExternalUrl';
 import { copyText } from '../lib/copyText';
-import { formatExpiryLabel, isExpired } from '../lib/dates';
+import { formatDate, formatExpiryLabel, isExpired } from '../lib/dates';
 import { markUsedWithUndo } from '../lib/markUsed';
 import { formatShekel } from '../lib/money';
 import { canRenderBarcode } from '../lib/barcode';
@@ -123,16 +124,25 @@ export function VoucherDetailSheet({
               initialBalance={voucher.initialBalance}
             />
 
-            {voucher.expiresAt !== undefined ? (
-              <p
-                className={
-                  isExpired(voucher.expiresAt)
-                    ? 'text-sm font-semibold text-danger'
-                    : 'text-sm text-muted'
-                }
-              >
-                {formatExpiryLabel(voucher.expiresAt)}
-              </p>
+            {voucher.receivedAt !== undefined || voucher.expiresAt !== undefined ? (
+              <div className="flex flex-col gap-1">
+                {voucher.receivedAt !== undefined ? (
+                  <p className="text-sm text-muted">
+                    Received {formatDate(voucher.receivedAt)}
+                  </p>
+                ) : null}
+                {voucher.expiresAt !== undefined ? (
+                  <p
+                    className={
+                      isExpired(voucher.expiresAt)
+                        ? 'text-sm font-semibold text-danger'
+                        : 'text-sm text-muted'
+                    }
+                  >
+                    {formatExpiryLabel(voucher.expiresAt)}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
 
             {used ? (
@@ -150,7 +160,7 @@ export function VoucherDetailSheet({
                   variant="secondary"
                   fullWidth
                   onClick={() => {
-                    window.open(voucher.url, '_blank', 'noopener,noreferrer');
+                    void openExternalUrl(voucher.url ?? '');
                   }}
                 >
                   Open URL
