@@ -50,6 +50,12 @@ export function isUsedVoucher(voucher: Voucher): boolean {
 export interface ImportRecord {
   fingerprint: string;
   parserId: string;
+  /**
+   * Voucher this import produced, so deleting the voucher also retires its
+   * fingerprint and the message can be imported again. Absent on records
+   * written before the link existed.
+   */
+  voucherId?: string;
   importedAt: number;
 }
 

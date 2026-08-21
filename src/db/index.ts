@@ -40,9 +40,12 @@ export {
 export type { VoucherInput, VoucherPatch } from './vouchers';
 export {
   createImportRecord,
+  deleteImportRecordsForVouchers,
   getImportRecord,
   hasImportRecord,
+  isTraceableFingerprint,
   listImportRecords,
+  pruneOrphanedImportRecords,
 } from './importRecords';
 export type { ImportRecordInput } from './importRecords';
 export {

@@ -3,6 +3,7 @@ import {
   createImportRecord,
   createVoucher,
   hasImportRecord,
+  pruneOrphanedImportRecords,
   rememberCompanySmsSender,
   resolveImportFingerprint,
 } from '../db';
@@ -24,6 +25,7 @@ export function defaultSmsSinceInput(now = new Date()): string {
 }
 
 async function rowsFromInbox(sender: string, minDate: number): Promise<SmsImportRow[]> {
+  await pruneOrphanedImportRecords();
   const messages = await querySmsInbox({ sender, minDate });
   const rows = await Promise.all(
     messages.map(async (sms) => {
@@ -232,7 +234,7 @@ export function useSmsImportFlow() {
           row.parsed.barcodeFormat === 'none' && isTwentyDigitCode(code)
             ? 'code128'
             : row.parsed.barcodeFormat;
-        await createVoucher({
+        const voucher = await createVoucher({
           companyId,
           code,
           cvv: row.parsed.cvv,
@@ -247,6 +249,7 @@ export function useSmsImportFlow() {
         await createImportRecord({
           fingerprint: row.fingerprint,
           parserId: row.parserId,
+          voucherId: voucher.id,
         });
         imported += 1;
       }

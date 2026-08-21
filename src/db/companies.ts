@@ -1,5 +1,6 @@
 import { db } from './database';
 import { EntityNotFoundError } from './errors';
+import { deleteImportRecordsForVouchers } from './importRecords';
 import { senderMatches } from '../lib/smsSender';
 import type { Company } from './schema';
 
@@ -112,8 +113,16 @@ export async function deleteCompany(id: string): Promise<void> {
     throw new EntityNotFoundError('Company', id);
   }
 
-  await db.transaction('rw', db.companies, db.vouchers, async () => {
-    await db.vouchers.where('companyId').equals(id).delete();
-    await db.companies.delete(id);
-  });
+  await db.transaction(
+    'rw',
+    db.companies,
+    db.vouchers,
+    db.importRecords,
+    async () => {
+      const vouchers = await db.vouchers.where('companyId').equals(id).toArray();
+      await db.vouchers.bulkDelete(vouchers.map((voucher) => voucher.id));
+      await deleteImportRecordsForVouchers(vouchers);
+      await db.companies.delete(id);
+    },
+  );
 }

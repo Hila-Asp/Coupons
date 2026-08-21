@@ -1,5 +1,6 @@
 import { db } from './database';
 import { EntityNotFoundError } from './errors';
+import { deleteImportRecordsForVouchers } from './importRecords';
 import {
   isUsedVoucher,
   type BarcodeFormat,
@@ -176,25 +177,29 @@ export async function updateVoucher(
 }
 
 export async function deleteVoucher(id: string): Promise<void> {
-  const existing = await db.vouchers.get(id);
-  if (!existing) {
-    throw new EntityNotFoundError('Voucher', id);
-  }
-  await db.vouchers.delete(id);
+  await db.transaction('rw', db.vouchers, db.importRecords, async () => {
+    const existing = await db.vouchers.get(id);
+    if (!existing) {
+      throw new EntityNotFoundError('Voucher', id);
+    }
+    await db.vouchers.delete(id);
+    await deleteImportRecordsForVouchers([existing]);
+  });
 }
 
 /** Clears out spent vouchers in one folder. Returns how many were removed. */
 export async function deleteUsedVouchersByCompany(
   companyId: string,
 ): Promise<number> {
-  return db.transaction('rw', db.vouchers, async () => {
+  return db.transaction('rw', db.vouchers, db.importRecords, async () => {
     const vouchers = await db.vouchers
       .where('companyId')
       .equals(companyId)
       .toArray();
-    const ids = vouchers.filter(isUsedVoucher).map((voucher) => voucher.id);
-    await db.vouchers.bulkDelete(ids);
-    return ids.length;
+    const used = vouchers.filter(isUsedVoucher);
+    await db.vouchers.bulkDelete(used.map((voucher) => voucher.id));
+    await deleteImportRecordsForVouchers(used);
+    return used.length;
   });
 }
 

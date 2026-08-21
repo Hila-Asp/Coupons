@@ -252,6 +252,7 @@ export function ImportReviewForm({
       await createImportRecord({
         fingerprint: draft.fingerprint,
         parserId: draft.parserId,
+        voucherId: voucher.id,
       });
       onSaved(voucher, companyName);
     } catch (error) {

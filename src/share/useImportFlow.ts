@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getVoucherBySourceUrl,
   hasImportRecord,
+  pruneOrphanedImportRecords,
   resolveImportFingerprint,
   type Voucher,
 } from '../db';
@@ -88,6 +89,10 @@ export function useImportFlow(sharedText: string) {
       }
 
       fingerprintRef.current = fingerprint;
+      await pruneOrphanedImportRecords();
+      if (controller.signal.aborted) {
+        return;
+      }
       const alreadyImported = await hasImportRecord(fingerprint);
       if (controller.signal.aborted) {
         return;
